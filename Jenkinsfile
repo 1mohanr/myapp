@@ -2,26 +2,28 @@ pipeline {
     agent any
 
     environment {
-        REGISTRY          = 'docker.io'
-        REGISTRY_NAMESPACE = 'ramm978' // 👈 your Docker Hub username
-        IMAGE_NAME        = 'myapp'
-        K8S_NAMESPACE     = 'demo'
+        REGISTRY           = 'docker.io'
+        REGISTRY_NAMESPACE = 'ramm978' // Replace with your Docker Hub username
+        IMAGE_NAME         = 'myapp'
+        K8S_NAMESPACE      = 'demo'
     }
 
     stages {
+        stage('Cleanup') {
+            steps {
+                echo "Cleaning workspace before starting..."
+                deleteDir()   // wipes the workspace at the start of every build
+            }
+        }
+
         stage('Checkout') {
             steps {
                 script {
-                    // Clean workspace to avoid corrupted/missing .git issues
-                    deleteDir()
-
-                    // Explicitly clone your repo
                     git branch: 'main',
                         url: 'https://github.com/1mohanr/myapp.git'
                 }
 
                 script {
-                    // Generate short Git commit hash as image tag
                     env.IMAGE_TAG = sh(
                         script: 'git rev-parse --short HEAD',
                         returnStdout: true
@@ -34,9 +36,7 @@ pipeline {
 
         stage('Build Image') {
             steps {
-                script {
-                    sh "docker build -t ${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                }
+                sh "docker build -t ${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG} ."
             }
         }
 
@@ -53,12 +53,17 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    sh """
-                        kubectl -n ${K8S_NAMESPACE} set image deployment/${IMAGE_NAME}-deployment ${IMAGE_NAME}=${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG} --record
-                    """
-                }
+                sh """
+                    kubectl -n ${K8S_NAMESPACE} set image deployment/${IMAGE_NAME}-deployment ${IMAGE_NAME}=${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG} --record
+                """
             }
+        }
+    }
+
+    post {
+        always {
+            echo "Cleaning workspace after build..."
+            cleanWs()   // requires 'Workspace Cleanup Plugin'
         }
     }
 }
