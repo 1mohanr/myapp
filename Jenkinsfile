@@ -1,71 +1,65 @@
 pipeline {
-agent any
-environment {
-REGISTRY = 'docker.io'
-REGISTRY_NAMESPACE = 'ramm978' // 👈 your Docker Hub username
-IMAGE_NAME = 'myapp'
-K8S_NAMESPACE = 'demo'
+    agent any
+
+    environment {
+        REGISTRY          = 'docker.io'
+        REGISTRY_NAMESPACE = 'ramm978' // 👈 your Docker Hub username
+        IMAGE_NAME        = 'myapp'
+        K8S_NAMESPACE     = 'demo'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    // Clean workspace to avoid corrupted/missing .git issues
+                    deleteDir()
+
+                    // Explicitly clone your repo
+                    git branch: 'main',
+                        url: 'https://github.com/1mohanr/myapp.git'
+                }
+
+                script {
+                    // Generate short Git commit hash as image tag
+                    env.IMAGE_TAG = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+                }
+
+                echo "Image tag will be: ${env.IMAGE_TAG}"
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                script {
+                    sh "docker build -t ${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                }
+            }
+        }
+
+        stage('Login & Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PWD')]) {
+                    sh """
+                        echo $DH_PWD | docker login -u $DH_USER --password-stdin $REGISTRY
+                        docker push ${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh """
+                        kubectl -n ${K8S_NAMESPACE} set image deployment/${IMAGE_NAME}-deployment ${IMAGE_NAME}=${REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG} --record
+                    """
+                }
+            }
+        }
+    }
 }
-stages {
-stage('Checkout') {
-steps {
-checkout scm
-script {
-env.IMAGE_TAG = sh(
-script: 'git rev-parse --short HEAD',
-returnStdout: true
-).trim()
-}
-echo "Image tag will be: ${env.IMAGE_TAG}"
-}
-}
-stage('Docker Build & Push') {
-steps {
-withCredentials([usernamePassword(
-credentialsId: 'dockerhub-credentials',
-usernameVariable: 'DOCKER_USER',
-passwordVariable: 'DOCKER_PASS'
-)]) {
-sh '''
-docker build -t $REGISTRY/$REGISTRY_NAMESPACE/$IMAGE_NAME:$IMAGE_TAG .
-echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin $REGISTRY
-docker push $REGISTRY/$REGISTRY_NAMESPACE/$IMAGE_NAME:$IMAGE_TAG
-docker logout $REGISTRY
-'''
-}
-}
-}
-stage('Deploy to Kubernetes') {
-steps {
-withCredentials([
-file(credentialsId: 'kubeconfig-file', variable: 'KUBECONFIG'),
-usernamePassword(credentialsId: 'dockerhub-credentials',
-usernameVariable: 'DOCKER_USER',
-passwordVariable: 'DOCKER_PASS')
-]) {
-sh '''
-set -eux
-# Ensure namespace exists
-kubectl get ns $K8S_NAMESPACE || kubectl create ns $K8S_NAMESPACE
-# Create/update imagePullSecret
-kubectl -n $K8S_NAMESPACE create secret docker-registry regcred \
---docker-server=$REGISTRY \
---docker-username=$DOCKER_USER \
---docker-password=$DOCKER_PASS \
---docker-email=ci@example.com \
---dry-run=client -o yaml | kubectl apply -f -
-# Apply manifests
-kubectl -n $K8S_NAMESPACE apply -f k8s/
-# Update deployment image
-kubectl -n $K8S_NAMESPACE set image deployment/myapp \
-app=$REGISTRY/$REGISTRY_NAMESPACE/$IMAGE_NAME:$IMAGE_TAG --record
-# Wait for rollout
-kubectl -n $K8S_NAMESPACE rollout status deployment/myapp
-# Show resources
-kubectl -n $K8S_NAMESPACE get all
-'''
-}
-}
-}
-}
-}
+
