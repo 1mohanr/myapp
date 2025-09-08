@@ -28,11 +28,14 @@ pipeline {
             }
         }
 
-       stage('Deploy to Kubernetes') {
-    steps {
-        withEnv(["KUBECONFIG=/var/lib/jenkins/.kube/config"]) {
-            sh 'kubectl apply -f k8s/'
+        stage('Deploy to Kubernetes') {
+            steps {
+                withEnv(["KUBECONFIG=/var/lib/jenkins/.kube/config"]) {
+                    // Apply only YAML files inside k8s/ folder
+                    sh 'kubectl apply -f k8s/'
+                }
+            }
         }
-    }
-}
+    } // closes stages
+} // closes pipeline
 
