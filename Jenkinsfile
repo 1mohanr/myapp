@@ -4,7 +4,6 @@ pipeline {
     environment {
         DOCKERHUB_USER = "ramm978"
         IMAGE_NAME = "myapp"
-        KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
 
     stages {
@@ -35,12 +34,11 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                withEnv(["KUBECONFIG=${KUBECONFIG}"]) {
-                    // Automatically update Deployment with new image
-                    sh "kubectl set image deployment/myapp-deployment myapp=${DOCKERHUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER} -n default"
-
-                    // Apply any updated YAMLs in repo (manifests change automation)
-                    sh "kubectl apply -f k8s/"
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                    sh """
+                        kubectl set image deployment/myapp-deployment myapp=${DOCKERHUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER} -n default
+                        kubectl apply -f k8s/
+                    """
                 }
             }
         }
